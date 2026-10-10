@@ -17,6 +17,12 @@
   and pattern selection from a Home Assistant account, no extra hub.
 </p>
 
+> **Hub2 controllers only.** This integration supports Gemstone Lights
+> **Hub2** controllers (2024 and newer), which use the *Gemstone Lights Hub2*
+> app and account. Original **Hub1** controllers (2017–2024, *Gemstone Lights
+> Hub* app) run on a different cloud platform with separate accounts and are
+> not supported.
+
 ---
 
 ## Features
