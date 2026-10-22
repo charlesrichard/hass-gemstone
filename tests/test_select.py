@@ -279,11 +279,10 @@ async def test_select_custom_design_updates_current_option(
     mock_client: MagicMock,
     mock_device: MagicMock,
 ) -> None:
-    """After applying a design the picker echoes it instead of "None".
+    """After applying a design the picker shows it instead of "None".
 
-    The cloud can't report an active architectural design, so the entity
-    tracks the selection as UI state rather than reverting to the
-    placeholder.
+    The state is updated optimistically until the next poll reports the
+    design under ``currentlyPlaying.architectural``.
     """
     await _setup(hass)
     eid = _custom_design_entity_id(hass)
@@ -295,14 +294,14 @@ async def test_select_custom_design_updates_current_option(
         blocking=True,
     )
     assert hass.states.get(eid).state == "Front Door"
-    # Selecting the placeholder clears it back to "None".
+    # Selecting the placeholder can't "un-play" a design: the lit design stays.
     await hass.services.async_call(
         SELECT_DOMAIN,
         SERVICE_SELECT_OPTION,
         {ATTR_ENTITY_ID: eid, ATTR_OPTION: "None"},
         blocking=True,
     )
-    assert hass.states.get(eid).state == "None"
+    assert hass.states.get(eid).state == "Front Door"
 
 
 async def test_selecting_custom_design_placeholder_is_noop(

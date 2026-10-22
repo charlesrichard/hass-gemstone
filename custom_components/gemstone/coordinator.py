@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, replace
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -21,6 +22,48 @@ from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
+KIND_PATTERN = "pattern"
+KIND_CUSTOM_DESIGN = "custom_design"
+KIND_PLAYLIST = "playlist"
+KIND_COLOR = "color"
+
+
+@dataclass(frozen=True, slots=True)
+class NowPlaying:
+    """What the controller is playing, as ``currentlyPlaying`` reports it."""
+
+    kind: str
+    id: str | None = None
+    name: str | None = None
+
+
+def now_playing(data: DeviceState | None) -> NowPlaying | None:
+    """Work out what is playing from a ``currentlyPlaying`` report.
+
+    The cloud reports exactly one of these at a time: a folder ``pattern``
+    (``architectural`` is null), or a Custom Design under ``architectural``
+    (the ``pattern`` key is absent). ``data.pattern`` is checked first so an
+    optimistic pattern update wins over a stale ``architectural`` in ``raw``.
+    ``playlist`` and ``color`` are handled defensively; their payload shapes
+    haven't been captured yet.
+    """
+    if data is None:
+        return None
+    if data.pattern is not None:
+        return NowPlaying(KIND_PATTERN, data.pattern.id or None, data.pattern.name or None)
+    raw = data.raw or {}
+    design = raw.get("architectural")
+    if isinstance(design, dict):
+        return NowPlaying(
+            KIND_CUSTOM_DESIGN, design.get("id") or None, design.get("name") or None
+        )
+    playlist = raw.get("playlist")
+    if isinstance(playlist, dict):
+        return NowPlaying(KIND_PLAYLIST, playlist.get("id") or None, playlist.get("name") or None)
+    if raw.get("color") is not None:
+        return NowPlaying(KIND_COLOR)
+    return None
+
 
 class GemstoneCoordinator(DataUpdateCoordinator[DeviceState]):
     """Polling coordinator for a single Gemstone controller.
@@ -33,6 +76,9 @@ class GemstoneCoordinator(DataUpdateCoordinator[DeviceState]):
     selects a folder, in which case the picker entities fall back to
     "the folder of the currently playing pattern" via the catalogue's
     reverse index.
+
+    Which Custom Design is lit comes from the cloud: ``currentlyPlaying``
+    carries it under ``architectural`` (see :func:`now_playing`).
     """
 
     def __init__(
@@ -51,7 +97,6 @@ class GemstoneCoordinator(DataUpdateCoordinator[DeviceState]):
         self.device = device
         self.active_folder: str | None = None
         self.architectural_designs: list[ArchitecturalDesign] = []
-        self.active_custom_design: str | None = None
 
     async def async_refresh_architectural_designs(self) -> None:
         """Fetch this device's saved "Custom Designs" (Quick Access looks).
@@ -73,19 +118,22 @@ class GemstoneCoordinator(DataUpdateCoordinator[DeviceState]):
         self.active_folder = folder
         self.async_update_listeners()
 
-    def set_active_custom_design(self, name: str | None) -> None:
-        """Record which Custom Design was last applied and re-render selects.
+    @property
+    def now_playing(self) -> NowPlaying | None:
+        return now_playing(self.data)
 
-        The cloud's ``currentlyPlaying`` endpoint only ever reports a
-        *pattern* (it keeps returning the previously-played pattern even
-        while a static architectural design is lit), so it can't tell us
-        which design is active. We track the applied design as UI state —
-        mirroring ``active_folder`` — so the picker doesn't snap back to
-        the "None" placeholder after a selection. Playing a folder
-        pattern supersedes the design and clears this back to ``None``.
+    def async_set_playing_design(self, design: ArchitecturalDesign) -> None:
+        """Optimistically record that ``design`` is now lit.
+
+        Mirrors the shape ``currentlyPlaying`` reports for a Custom Design
+        (``architectural`` set, no ``pattern``); the next poll reconciles.
         """
-        self.active_custom_design = name
-        self.async_update_listeners()
+        data = self.data
+        if data is None:
+            return
+        raw = {**(data.raw or {}), "architectural": {"id": design.id, "name": design.name}}
+        raw.pop("pattern", None)
+        self.async_set_updated_data(replace(data, pattern=None, raw=raw))
 
     async def _async_update_data(self) -> DeviceState:
         try:

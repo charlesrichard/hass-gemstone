@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import GemstoneConfigEntry, PatternCatalogue
-from .coordinator import GemstoneCoordinator
+from .coordinator import KIND_CUSTOM_DESIGN, GemstoneCoordinator
 from .entity import GemstoneEntity
 
 # Shown as the pattern dropdown's current value when the device's playing
@@ -128,9 +128,6 @@ class GemstonePatternSelect(GemstoneEntity, SelectEntity):
         if pattern is None:
             return
         await self.coordinator.device.play_pattern(pattern)
-        # A folder pattern supersedes any active Custom Design, so clear the
-        # design picker back to its "None" placeholder.
-        self.coordinator.active_custom_design = None
         # Optimistic local update: the cloud's ``currentlyPlaying`` endpoint
         # lags ~30-60s behind the device, so refreshing immediately would
         # report the previous pattern and snap the UI back. Publish the
@@ -140,9 +137,9 @@ class GemstonePatternSelect(GemstoneEntity, SelectEntity):
             self.coordinator.async_set_updated_data(replace(data, pattern=pattern))
 
 
-# Shown when no Custom Design is currently applied (e.g. the device is
-# playing a folder pattern instead), and listed first so HA's service-call
-# validator accepts it as a valid "no selection" option.
+# Shown when no Custom Design is lit (e.g. the device is playing a folder
+# pattern instead), and listed first so HA's service-call validator accepts
+# it as a valid "no selection" option. Selecting it is a no-op.
 CUSTOM_DESIGN_PLACEHOLDER = "None"
 
 
@@ -167,11 +164,17 @@ class GemstoneCustomDesignSelect(GemstoneEntity, SelectEntity):
 
     @property
     def current_option(self) -> str | None:
-        return self.coordinator.active_custom_design or CUSTOM_DESIGN_PLACEHOLDER
+        playing = self.coordinator.now_playing
+        if (
+            playing is not None
+            and playing.kind == KIND_CUSTOM_DESIGN
+            and playing.name in self.options
+        ):
+            return playing.name
+        return CUSTOM_DESIGN_PLACEHOLDER
 
     async def async_select_option(self, option: str) -> None:
         if option == CUSTOM_DESIGN_PLACEHOLDER:
-            self.coordinator.set_active_custom_design(None)
             return
         design = next(
             (d for d in self.coordinator.architectural_designs if d.name == option),
@@ -180,7 +183,6 @@ class GemstoneCustomDesignSelect(GemstoneEntity, SelectEntity):
         if design is None:
             return
         await self.coordinator.device.apply_architectural_design(design)
-        # The cloud can't report an active design (see
-        # ``set_active_custom_design``), so echo the selection as UI state
-        # instead of snapping back to the "None" placeholder.
-        self.coordinator.set_active_custom_design(design.name)
+        # Optimistic local update until the next poll picks the design up
+        # from ``currentlyPlaying``.
+        self.coordinator.async_set_playing_design(design)

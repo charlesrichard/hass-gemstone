@@ -32,6 +32,15 @@
   is applied to the active pattern; the colour palette is preserved.
 - 🎨 **`select.<controller>_pattern`** — pick any pattern from your
   saved folders.
+- 📡 **`sensor.<controller>_now_playing`** — the name of whatever the
+  cloud reports as playing: any pattern, including ones that aren't saved
+  in your folders (e.g. played from Gemstone's preset library), or the
+  lit Custom Design. Attributes: `type` (`pattern` / `custom_design`),
+  `id` and `in_saved_folders`. A diagnostic
+  `sensor.<controller>_last_updated` timestamp advances on every command.
+- 🖼️ **`select.<controller>_custom_design`** — apply a saved Custom Design;
+  its state follows the design that's actually lit, including ones started
+  from the app.
 - 🏠 **Multi-home / multi-controller** — every controller across every
   homegroup on your account is discovered automatically.
 - ⚡ **Snappy UI** — every command is immediately followed by a re-poll
